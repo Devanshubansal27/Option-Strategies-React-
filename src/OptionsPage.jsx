@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-
+import "./OptionsPage.css";
 import {
   Search,
   Clock,
@@ -12,10 +12,10 @@ import {
 
 const OptionsPage = () => {
   // State for the input field (separate from selectedStock)
-  const [tickerInput, setTickerInput] = useState("MSFT");
+  const [tickerInput, setTickerInput] = useState("");
 
   const [selectedStock, setSelectedStock] = useState({
-    ticker: "MSFT",
+    ticker: "",
     currentPrice: 438.17,
     atmStrike: 437.5,
     expiry: "2025-05-09",
@@ -26,6 +26,7 @@ const OptionsPage = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Fetch data from API
   const fetchOptionsData = async (ticker) => {
@@ -33,7 +34,7 @@ const OptionsPage = () => {
     setError("");
     try {
       const res = await axios.get(
-        `https://options-strategies.onrender.com/options-strategy-pnl?ticker=${ticker}`
+        `http://127.0.0.1:8000/options-strategy-pnl?ticker=${ticker}`
       );
       const data = res.data;
       setSelectedStock({
@@ -43,8 +44,10 @@ const OptionsPage = () => {
         expiry: data.expiry,
       });
       setStrategiesData(data.strategies);
+      setHasSearched(true);
     } catch (err) {
       setError("Could not fetch data for ticker: " + ticker);
+      setHasSearched(true);
     } finally {
       setLoading(false);
     }
@@ -53,15 +56,11 @@ const OptionsPage = () => {
   // On Enter key in input, fetch data
   const handleTickerInputKeyDown = (e) => {
     if (e.key === "Enter") {
+      setHasSearched(true);
       fetchOptionsData(tickerInput.trim().toUpperCase());
     }
   };
 
-  // On mount, fetch initial data for MSFT
-  useEffect(() => {
-    fetchOptionsData("MSFT");
-    // eslint-disable-next-line
-  }, []);
 
   // If strategiesData is present, use it for table, else fallback to old logic
   useEffect(() => {
@@ -144,199 +143,268 @@ const OptionsPage = () => {
     return Math.abs(price - selectedStock.atmStrike) < 0.01;
   };
 
+  // Helper: is ticker input empty
+  const isTickerEmpty = tickerInput.trim() === "";
+
+  // Fallback stock info for empty ticker
+  const fallbackStock = {
+    ticker: "Ticker",
+    currentPrice: 0,
+    atmStrike: 0,
+    expiry: "Not available",
+  };
+
+  // Fallback table rows for empty ticker
+  const fallbackTableRows = Array.from({ length: 9 }).map((_, rowIdx) => ({
+    price: 0,
+  }));
+
+  // Only show error if not empty ticker and user has searched
+  const showError = error && !isTickerEmpty && hasSearched;
+
+  // Error message for summary card
+  const summaryErrorMsg = showError ? "Please check the ticker symbol." : null;
+
+  // Always use the current input for summary fallback
+  const liveSummary = {
+    ticker: tickerInput.trim() === "" ? fallbackStock.ticker : tickerInput.trim().toUpperCase(),
+    currentPrice: 0,
+    atmStrike: 0,
+    expiry: fallbackStock.expiry,
+  };
+
+  // Determine if API data matches the current input
+  const apiTicker = selectedStock.ticker ? selectedStock.ticker.toUpperCase() : "";
+  const inputTicker = tickerInput.trim().toUpperCase();
+  const hasApiDataForInput =
+    strategiesData.length > 0 &&
+    !showError &&
+    inputTicker !== "" &&
+    apiTicker === inputTicker;
+
+  // Show summary data: loading -> shimmer, error -> error, else -> API or fallback
+  let summaryToShow = liveSummary;
+  if (loading) {
+    summaryToShow = null; // shimmer will show
+  } else if (showError) {
+    summaryToShow = { ...liveSummary, error: summaryErrorMsg };
+  } else if (hasApiDataForInput) {
+    summaryToShow = {
+      ticker: selectedStock.ticker,
+      currentPrice: selectedStock.currentPrice,
+      atmStrike: selectedStock.atmStrike,
+      expiry: selectedStock.expiry,
+    };
+  }
+
+  // Table rows: loading -> shimmer, error/empty -> $0, else -> API data
+  let tableRowsToShow = fallbackTableRows;
+  if (loading) {
+    tableRowsToShow = null; // shimmer will show
+  } else if (hasApiDataForInput) {
+    tableRowsToShow = priceRanges;
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
+    <div className="options-root">
       {/* Header */}
-      <div className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">
-              Options Strategies
-            </h1>
-            <div className="relative w-64">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="text"
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                placeholder="Search ticker..."
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value)}
-                onKeyDown={handleTickerInputKeyDown}
-                disabled={loading}
-              />
-            </div>
+      <div className="options-header">
+        <div className="options-header-inner">
+          <h1 className="options-title">Options Strategies</h1>
+          <div className="options-search-wrap">
+            <span className="options-search-icon">
+              <Search />
+            </span>
+            <input
+              type="text"
+              className="options-search-input"
+              placeholder="Search ticker..."
+              value={tickerInput}
+              onChange={(e) => {
+                setTickerInput(e.target.value);
+                setError("");
+                setHasSearched(false);
+                setStrategiesData([]);
+                setSelectedStock(fallbackStock);
+              }}
+              onKeyDown={handleTickerInputKeyDown}
+              disabled={loading}
+            />
           </div>
         </div>
       </div>
-      {/* Stock Info */}
-      <div className="bg-white shadow mt-4 mx-4 rounded-lg">
-        <div className="p-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-xl font-bold">
-                {selectedStock.ticker} — Current Price: ${selectedStock.currentPrice}
-              </h2>
-              <div className="flex items-center text-gray-600 mt-1">
-                <span>ATM Strike: {selectedStock.atmStrike}</span>
-                <span className="mx-2">|</span>
-                <div className="flex items-center">
-                  <Clock className="h-4 w-4 mr-1" />
-                  <span>Expiry: {selectedStock.expiry}</span>
+      {/* Stock Info Card */}
+      <div className="options-card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ flex: 1 }}>
+            {loading ? (
+              <>
+                <div className="skeleton-block medium shimmer" style={{ marginBottom: 10 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div className="skeleton-block short shimmer" />
+                  <div className="skeleton-block short shimmer" />
+                  <div className="skeleton-block medium shimmer" />
                 </div>
-              </div>
-            </div>
-            <button
-              className="flex items-center text-blue-600 hover:text-blue-800"
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-            >
-              <Settings className="h-5 w-5 mr-1" />
-              <span>Settings</span>
-              {isSettingsOpen ? (
-                <ChevronUp className="h-4 w-4 ml-1" />
-              ) : (
-                <ChevronDown className="h-4 w-4 ml-1" />
-              )}
-            </button>
+              </>
+            ) : summaryToShow && summaryToShow.error ? (
+              <div style={{ minHeight: 48, display: 'flex', alignItems: 'center', color: '#dc2626', fontWeight: 500, fontSize: '1.1rem' }}>{summaryToShow.error}</div>
+            ) : (
+              <>
+                <div className="options-stock-title">
+                  {summaryToShow.ticker} — Current Price: ${summaryToShow.currentPrice}
+                </div>
+                <div className="options-stock-meta">
+                  <span>ATM Strike: {summaryToShow.atmStrike}</span>
+                  <span>|</span>
+                  <span style={{ display: "flex", alignItems: "center" }}>
+                    <Clock style={{ width: 16, height: 16, marginRight: 4 }} />
+                    Expiry: {summaryToShow.expiry}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
-          {isSettingsOpen && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-md">
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Current Price
-                  </label>
-                  <input
-                    type="number"
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    value={selectedStock.currentPrice}
-                    onChange={(e) =>
-                      setSelectedStock({
-                        ...selectedStock,
-                        currentPrice: parseFloat(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    ATM Strike
-                  </label>
-                  <input
-                    type="number"
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    value={selectedStock.atmStrike}
-                    onChange={(e) =>
-                      setSelectedStock({
-                        ...selectedStock,
-                        atmStrike: parseFloat(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Expiry Date
-                  </label>
-                  <input
-                    type="date"
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    value={selectedStock.expiry}
-                    onChange={(e) =>
-                      setSelectedStock({
-                        ...selectedStock,
-                        expiry: e.target.value,
-                      })
-                    }
-                  />
-                </div>
+          <button
+            className="options-settings-btn"
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+            disabled={loading}
+          >
+            <Settings style={{ width: 20, height: 20, marginRight: 6 }} />
+            <span>Settings</span>
+            {isSettingsOpen ? (
+              <ChevronUp style={{ width: 16, height: 16, marginLeft: 4 }} />
+            ) : (
+              <ChevronDown style={{ width: 16, height: 16, marginLeft: 4 }} />
+            )}
+          </button>
+        </div>
+        {isSettingsOpen && (
+          <div className="options-settings-panel">
+            <div className="options-settings-grid">
+              <div>
+                <label className="options-settings-label">Current Price</label>
+                <input
+                  type="number"
+                  className="options-settings-input"
+                  value={summaryToShow ? summaryToShow.currentPrice : 0}
+                  onChange={(e) =>
+                    setSelectedStock({
+                      ...selectedStock,
+                      currentPrice: parseFloat(e.target.value),
+                    })
+                  }
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="options-settings-label">ATM Strike</label>
+                <input
+                  type="number"
+                  className="options-settings-input"
+                  value={summaryToShow ? summaryToShow.atmStrike : 0}
+                  onChange={(e) =>
+                    setSelectedStock({
+                      ...selectedStock,
+                      atmStrike: parseFloat(e.target.value),
+                    })
+                  }
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="options-settings-label">Expiry Date</label>
+                <input
+                  type="date"
+                  className="options-settings-input"
+                  value={summaryToShow ? (summaryToShow.expiry === fallbackStock.expiry ? "" : summaryToShow.expiry) : ""}
+                  onChange={(e) =>
+                    setSelectedStock({
+                      ...selectedStock,
+                      expiry: e.target.value,
+                    })
+                  }
+                  disabled={loading}
+                />
               </div>
             </div>
-          )}
-        </div>
-      </div>
-      {/* Options Table */}
-      <div className="flex-1 mx-4 mt-4 mb-4 bg-white rounded-lg shadow overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-gray-500">Loading...</div>
-        ) : error ? (
-          <div className="p-8 text-center text-red-500">{error}</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th
-                    scope="col"
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-10"
-                  >
-                    Price at Expiry
-                  </th>
-                  {strategies.map((strategy) => (
-                    <th
-                      key={strategy.id}
-                      scope="col"
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      {strategy.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {priceRanges.map((pricePoint, index) => (
-                  <tr
-                    key={index}
-                    className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                  >
-                    <td
-                      className={`px-6 py-4 whitespace-nowrap text-sm font-medium sticky left-0 z-10 ${
-                        isStrikePrice(pricePoint.price)
-                          ? "bg-blue-100 text-blue-800 font-bold"
-                          : "text-gray-900"
-                      }`}
-                      style={{
-                        backgroundColor: isStrikePrice(pricePoint.price)
-                          ? "#dbeafe"
-                          : index % 2 === 0
-                          ? "white"
-                          : "#f9fafb",
-                      }}
-                    >
-                      ${pricePoint.price} {isStrikePrice(pricePoint.price) && "(Strike)"}
-                    </td>
-                    {strategies.map((strategy) => {
-                      const value = getStrategyValue(
-                        strategy.id,
-                        pricePoint.price,
-                        index
-                      );
-                      return (
-                        <td
-                          key={`${index}-${strategy.id}`}
-                          className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
-                        >
-                          <span
-                            className={
-                              typeof value === "string" && value.startsWith("+")
-                                ? "text-green-600"
-                                : typeof value === "string" && value.startsWith("-")
-                                ? "text-red-600"
-                                : ""
-                            }
-                          >
-                            {formatValue(value)}
-                          </span>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
+      </div>
+      {/* Options Table */}
+      <div className="options-table-wrap">
+        <div className="options-table-scroll">
+          <table className="options-table">
+            <thead>
+              <tr>
+                <th>Price at Expiry</th>
+                {strategies.map((strategy) => (
+                  <th key={strategy.id}>{strategy.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading
+                ? Array.from({ length: 9 }).map((_, rowIdx) => (
+                    <tr className="skeleton-table-row" key={rowIdx}>
+                      <td>
+                        <div className="skeleton-table-cell shimmer" style={{ width: 100 }} />
+                      </td>
+                      {strategies.map((_, colIdx) => (
+                        <td key={colIdx}>
+                          <div className="skeleton-table-cell shimmer" style={{ width: 70 }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                : hasApiDataForInput
+                  ? priceRanges.map((pricePoint, index) => (
+                      <tr key={index}>
+                        <td
+                          className={
+                            isStrikePrice(pricePoint.price)
+                              ? "options-strike"
+                              : ""
+                          }
+                        >
+                          ${pricePoint.price}
+                          {isStrikePrice(pricePoint.price) && (
+                            <span className="options-strike-label"> (Strike)</span>
+                          )}
+                        </td>
+                        {strategies.map((strategy) => {
+                          const value = getStrategyValue(
+                            strategy.id,
+                            pricePoint.price,
+                            index
+                          );
+                          return (
+                            <td
+                              key={`${index}-${strategy.id}`}
+                              className={
+                                typeof value === "string" && value.startsWith("+")
+                                  ? "options-pos"
+                                  : typeof value === "string" && value.startsWith("-")
+                                  ? "options-neg"
+                                  : ""
+                              }
+                            >
+                              {formatValue(value)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))
+                  : fallbackTableRows.map((_, rowIdx) => (
+                      <tr key={rowIdx}>
+                        <td>$0</td>
+                        {strategies.map((strategy, colIdx) => (
+                          <td key={colIdx}>$0</td>
+                        ))}
+                      </tr>
+                    ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
